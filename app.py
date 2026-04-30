@@ -1,4 +1,3 @@
-1.app.py:
 from flask import Flask, request
 import requests
 from bs4 import BeautifulSoup
