@@ -1,43 +1,22 @@
-from flask import Flask, request, render_template_string
+from flask import Flask, request
 import requests
 from bs4 import BeautifulSoup
 import urllib3
-import sqlite3
 from datetime import datetime
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 app = Flask(__name__)
 
-# 資料庫檔案名稱
-DATABASE = 'movies.db'
-
-def get_db():
-    """取得資料庫連線"""
-    conn = sqlite3.connect(DATABASE)
-    conn.row_factory = sqlite3.Row  # 讓查詢結果可以用欄位名稱存取
-    return conn
-
-def init_db():
-    """初始化資料庫：建立電影資料表"""
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS movies (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
-            poster_url TEXT,
-            detail_url TEXT,
-            release_date TEXT,
-            runtime TEXT,
-            last_update TEXT
-        )
-    ''')
-    conn.commit()
-    conn.close()
+# 使用全域變數儲存電影資料（Vercel 環境可用）
+movies_data = []
+last_update_info = ""
+movie_count_info = 0
 
 def spider_and_save():
-    """爬取開眼電影網近期上映電影，存到資料庫"""
+    """爬取開眼電影網近期上映電影，存到全域變數"""
+    global movies_data, last_update_info, movie_count_info
+    
     url = "http://www.atmovies.com.tw/movie/next/"
     Data = requests.get(url, verify=False)
     Data.encoding = "utf-8"
@@ -46,15 +25,10 @@ def spider_and_save():
     
     # 取得更新時間
     update_tag = sp.find("div", class_="smaller09")
-    last_update = update_tag.text[5:] if update_tag else datetime.now().strftime("%Y-%m-%d %H:%M")
+    last_update_info = update_tag.text[5:] if update_tag else datetime.now().strftime("%Y-%m-%d %H:%M")
     
-    conn = get_db()
-    cursor = conn.cursor()
-    
-    # 先清空舊資料（可依需求保留或覆蓋）
-    cursor.execute("DELETE FROM movies")
-    
-    for item in result:
+    movies = []
+    for idx, item in enumerate(result, 1):
         # 海報圖片
         img_tag = item.find("img")
         poster_url = img_tag.get("src") if img_tag else ""
@@ -88,29 +62,129 @@ def spider_and_save():
             release_date = "未知"
             runtime = "未知"
         
-        # 存入資料庫
-        cursor.execute('''
-            INSERT INTO movies (title, poster_url, detail_url, release_date, runtime, last_update)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (title, poster_url, detail_url, release_date, runtime, last_update))
+        movies.append({
+            "id": idx,
+            "title": title,
+            "poster_url": poster_url,
+            "detail_url": detail_url,
+            "release_date": release_date,
+            "runtime": runtime,
+            "last_update": last_update_info
+        })
     
-    conn.commit()
-    movie_count = cursor.rowcount
-    conn.close()
-    
-    return last_update, movie_count
+    movies_data = movies
+    movie_count_info = len(movies)
+    return last_update_info, movie_count_info
 
 
 @app.route("/")
 def index():
     """首頁"""
-    with open("index.html", "r", encoding="utf-8") as f:
-        return f.read()
+    return """
+    <!DOCTYPE html>
+    <html lang="zh-TW">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>電影爬蟲系統 - 靜宜大學資管系</title>
+        <style>
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+
+            body {
+                font-family: 'Microsoft JhengHei', Arial, sans-serif;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                margin: 0;
+                padding: 0;
+                min-height: 100vh;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+            }
+
+            .container {
+                background: white;
+                border-radius: 20px;
+                box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+                padding: 50px;
+                max-width: 600px;
+                width: 90%;
+                text-align: center;
+            }
+
+            h1 {
+                color: #667eea;
+                font-size: 2.5em;
+                margin-bottom: 10px;
+            }
+
+            .subtitle {
+                color: #666;
+                font-size: 1em;
+                margin-bottom: 30px;
+                border-bottom: 2px solid #667eea;
+                display: inline-block;
+                padding-bottom: 5px;
+            }
+
+            h2 {
+                color: #333;
+                margin-bottom: 30px;
+                font-size: 1.3em;
+            }
+
+            .btn {
+                display: block;
+                background: #667eea;
+                color: white;
+                text-decoration: none;
+                padding: 15px 30px;
+                margin: 20px 0;
+                border-radius: 50px;
+                font-size: 1.1em;
+                transition: all 0.3s ease;
+                box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+            }
+
+            .btn:hover {
+                background: #764ba2;
+                transform: translateY(-3px);
+                box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+            }
+
+            .btn-secondary {
+                background: #ff6b6b;
+                box-shadow: 0 4px 15px rgba(255, 107, 107, 0.4);
+            }
+
+            .btn-secondary:hover {
+                background: #ee5a52;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>🕷️ 網路爬蟲</h1>
+            <div class="subtitle">靜宜大學資管系 彭韋諾</div>
+            
+            <h2>🎬 開眼電影網 - 電影爬蟲系統</h2>
+            
+            <a href="/spiderMovie" class="btn">🚀 (1) 爬取最新電影資料 (存入資料庫)</a>
+            <a href="/searchMovie" class="btn btn-secondary">🔍 (2) 查詢電影 (輸入關鍵字)</a>
+        </div>
+    </body>
+    </html>
+    """
 
 
 @app.route("/spiderMovie")
 def spider_movie():
     """(1) 爬取即將上映電影，存到資料庫，顯示最近更新日期及筆數"""
+    global movies_data, last_update_info, movie_count_info
+    
     try:
         last_update, movie_count = spider_and_save()
         return f"""
@@ -180,14 +254,20 @@ def search_movie():
         </html>
         """
     
-    # 從資料庫查詢
-    conn = get_db()
-    cursor = conn.cursor()
+    # 從全域變數查詢
+    global movies_data
     
-    # 使用 LIKE 進行模糊比對
-    cursor.execute("SELECT * FROM movies WHERE title LIKE ? ORDER BY id", (f'%{keyword}%',))
-    results = cursor.fetchall()
-    conn.close()
+    if not movies_data:
+        return """
+        <div style="text-align:center; padding:50px;">
+            <h2>⚠️ 暫無資料</h2>
+            <p>請先前往 <a href="/spiderMovie">爬蟲頁面</a> 爬取電影資料</p>
+            <a href="/">回首頁</a>
+        </div>
+        """
+    
+    # 模糊比對
+    results = [movie for movie in movies_data if keyword in movie['title']]
     
     # 產生結果頁面
     html = f"""
@@ -220,7 +300,7 @@ def search_movie():
         html += f"""
             <div class="no-result">
                 <p>❌ 找不到包含「{keyword}」的電影</p>
-                <p>請先到 <a href="/spiderMovie">爬蟲頁面</a> 爬取電影資料</p>
+                <p>請嘗試其他關鍵字，或 <a href="/spiderMovie">重新爬取資料</a></p>
             </div>
         """
     else:
@@ -254,8 +334,5 @@ def search_movie():
     return html
 
 
-# 啟動時初始化資料庫
-init_db()
-
-if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0", port=5000)
+# Vercel 需要這個變數
+app.debug = False
