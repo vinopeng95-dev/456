@@ -1,204 +1,184 @@
-from flask import Flask, request
+from flask import Flask, request, jsonify
 import requests
 from bs4 import BeautifulSoup
 import urllib3
 from datetime import datetime
 import json
+import os
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 app = Flask(__name__)
 
-# 使用全域變數儲存電影資料（Vercel 環境可用）
-movies_cache = {
-    "data": [],
-    "last_update": "",
-    "count": 0
-}
+# 使用 JSON 檔案當作簡單的資料庫（Vercel 相容）
+DATA_FILE = "movies_data.json"
 
-def spider_movies():
-    """爬取開眼電影網近期上映電影"""
+def save_to_json(movies, last_update):
+    """儲存電影資料到 JSON 檔案"""
+    data = {
+        "last_update": last_update,
+        "movies": movies,
+        "count": len(movies)
+    }
+    with open(DATA_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    return data
+
+def load_from_json():
+    """從 JSON 檔案讀取電影資料"""
+    if os.path.exists(DATA_FILE):
+        with open(DATA_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return None
+
+@app.route("/spiderMovie")
+def spider_movie():
+    """(1) 爬取即將上映電影，存到資料庫，並顯示最近更新日期及爬取電影有幾部"""
+    
     url = "http://www.atmovies.com.tw/movie/next/"
     Data = requests.get(url, verify=False)
     Data.encoding = "utf-8"
     sp = BeautifulSoup(Data.text, "html.parser")
     result = sp.select(".filmListAllX li")
-    
-    # 取得更新時間
-    update_tag = sp.find("div", class_="smaller09")
-    last_update = update_tag.text[5:] if update_tag else datetime.now().strftime("%Y-%m-%d %H:%M")
+    lastUpdate = sp.find("div", class_="smaller09").text[5:]
     
     movies = []
-    for idx, item in enumerate(result, 1):
+    idx = 1
+    
+    for item in result:
         # 海報圖片
         img_tag = item.find("img")
-        poster_url = img_tag.get("src") if img_tag else ""
+        picture = img_tag.get("src") if img_tag else ""
         
         # 電影名稱
         title_tag = item.find("div", class_="filmtitle")
-        title = title_tag.text.strip() if title_tag else "未知"
+        title = title_tag.text if title_tag else "未知"
         
         # 電影介紹頁
         a_tag = title_tag.find("a") if title_tag else None
-        detail_url = "http://www.atmovies.com.tw" + a_tag.get("href") if a_tag else ""
+        hyperlink = "http://www.atmovies.com.tw" + a_tag.get("href") if a_tag else ""
         
         # 上映日期與片長
         runtime_tag = item.find("div", class_="runtime")
         if runtime_tag:
-            runtime_text = runtime_tag.text
-            if "上映日期：" in runtime_text:
-                date_part = runtime_text.split("上映日期：")[1].split("片長：")[0].strip()
-                release_date = date_part[:10] if len(date_part) >= 10 else date_part
-            else:
-                release_date = "未知"
-            
-            if "片長：" in runtime_text:
-                length_part = runtime_text.split("片長：")[1].replace("分", "").strip()
-                runtime = length_part
-            else:
-                runtime = "未知"
+            show = runtime_tag.text.replace("上映日期：", "").replace("片長：", "").replace("分", "")
+            showDate = show[0:10] if len(show) >= 10 else "未知"
+            showLength = show[13:] if len(show) > 13 else "未知"
         else:
-            release_date = "未知"
-            runtime = "未知"
+            showDate = "未知"
+            showLength = "未知"
         
         movies.append({
             "id": idx,
             "title": title,
-            "poster_url": poster_url,
-            "detail_url": detail_url,
-            "release_date": release_date,
-            "runtime": runtime
+            "poster": picture,
+            "url": hyperlink,
+            "release_date": showDate,
+            "length": showLength
         })
+        idx += 1
     
-    return last_update, movies
-
-
-@app.route("/")
-def index():
-    """首頁"""
-    return """
+    # 儲存到資料庫
+    save_to_json(movies, lastUpdate)
+    
+    # 顯示結果
+    html = f"""
     <!DOCTYPE html>
     <html lang="zh-TW">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>電影爬蟲系統 - 靜宜大學資管系</title>
+        <title>爬蟲儲存結果</title>
         <style>
-            * {
-                margin: 0;
-                padding: 0;
-                box-sizing: border-box;
-            }
-
-            body {
+            body {{
                 font-family: 'Microsoft JhengHei', Arial, sans-serif;
                 background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                margin: 0;
-                padding: 0;
                 min-height: 100vh;
-                display: flex;
-                justify-content: center;
-                align-items: center;
-            }
-
-            .container {
+                padding: 40px;
+                margin: 0;
+            }}
+            .container {{
+                max-width: 800px;
+                margin: 0 auto;
                 background: white;
                 border-radius: 20px;
+                padding: 40px;
                 box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-                padding: 50px;
-                max-width: 600px;
-                width: 90%;
                 text-align: center;
-            }
-
-            h1 {
-                color: #667eea;
-                font-size: 2.5em;
-                margin-bottom: 10px;
-            }
-
-            .subtitle {
-                color: #666;
-                font-size: 1em;
-                margin-bottom: 30px;
-                border-bottom: 2px solid #667eea;
+            }}
+            h1 {{ color: #667eea; }}
+            .success {{ color: #4CAF50; font-size: 48px; }}
+            .info {{ background: #e3f2fd; padding: 20px; border-radius: 10px; margin: 20px 0; }}
+            .info p {{ margin: 10px 0; font-size: 18px; }}
+            .btn {{
                 display: inline-block;
-                padding-bottom: 5px;
-            }
-
-            h2 {
-                color: #333;
-                margin-bottom: 30px;
-                font-size: 1.3em;
-            }
-
-            .btn {
-                display: block;
                 background: #667eea;
                 color: white;
                 text-decoration: none;
-                padding: 15px 30px;
-                margin: 20px 0;
+                padding: 12px 24px;
+                margin: 10px;
                 border-radius: 50px;
-                font-size: 1.1em;
                 transition: all 0.3s ease;
-                box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
-            }
-
-            .btn:hover {
-                background: #764ba2;
-                transform: translateY(-3px);
-                box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
-            }
-
-            .btn-secondary {
-                background: #ff6b6b;
-                box-shadow: 0 4px 15px rgba(255, 107, 107, 0.4);
-            }
-
-            .btn-secondary:hover {
-                background: #ee5a52;
-            }
-
-            .btn-green {
-                background: #4CAF50;
-                box-shadow: 0 4px 15px rgba(76, 175, 80, 0.4);
-            }
-
-            .btn-green:hover {
-                background: #45a049;
-            }
+            }}
+            .btn:hover {{ background: #764ba2; transform: translateY(-3px); }}
         </style>
     </head>
     <body>
         <div class="container">
-            <h1>🕷️ 網路爬蟲</h1>
-            <div class="subtitle">靜宜大學資管系 彭韋諾</div>
-            
-            <h2>🎬 開眼電影網 - 電影爬蟲系統</h2>
-            
-            <a href="/movie" class="btn">🎬 即時爬蟲顯示電影</a>
-            <a href="/spiderMovie" class="btn btn-green">💾 (1) 爬取並儲存電影</a>
-            <a href="/searchMovie" class="btn btn-secondary">🔍 (2) 搜尋電影</a>
+            <div class="success">✓</div>
+            <h1>✅ 爬蟲儲存成功！</h1>
+            <div class="info">
+                <p>📅 最近更新日期：{lastUpdate}</p>
+                <p>🎬 爬取電影數量：{len(movies)} 部</p>
+            </div>
+            <a href="/searchMovie" class="btn">🔍 前往查詢電影</a>
+            <a href="/" class="btn">🏠 回首頁</a>
         </div>
     </body>
     </html>
     """
+    return html
 
-
-@app.route("/movie")
-def movie():
-    """即時爬蟲：直接顯示近期上映電影"""
+@app.route("/searchMovie")
+def search_movie():
+    """(2) 輸入片名關鍵字，查詢資料庫符合的電影，列出編號、片名、海報、介紹頁及上映日期"""
     
-    try:
-        last_update, movies = spider_movies()
-        
-        html = f"""
+    keyword = request.args.get("keyword", "")
+    
+    # 載入資料庫
+    data = load_from_json()
+    
+    if not data:
+        # 沒有資料時顯示警告
+        return """
+        <!DOCTYPE html>
+        <html>
+        <head><meta charset="UTF-8"><title>查詢電影</title>
+        <style>
+            body { font-family: Arial; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 40px; }
+            .container { max-width: 600px; margin: 0 auto; background: white; border-radius: 20px; padding: 40px; text-align: center; }
+            .btn { display: inline-block; background: #667eea; color: white; text-decoration: none; padding: 10px 20px; border-radius: 50px; margin-top: 20px; }
+        </style>
+        </head>
+        <body>
+            <div class="container">
+                <h2>⚠️ 尚無電影資料</h2>
+                <p>請先執行 <a href="/spiderMovie">爬蟲儲存</a> 取得電影資料</p>
+                <a href="/" class="btn">回首頁</a>
+            </div>
+        </body>
+        </html>
+        """
+    
+    if not keyword:
+        # 顯示搜尋表單
+        return f"""
         <!DOCTYPE html>
         <html lang="zh-TW">
         <head>
             <meta charset="UTF-8">
-            <title>近期上映電影</title>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>查詢電影</title>
             <style>
                 body {{
                     font-family: 'Microsoft JhengHei', Arial, sans-serif;
@@ -208,259 +188,306 @@ def movie():
                     margin: 0;
                 }}
                 .container {{
-                    max-width: 900px;
+                    max-width: 800px;
                     margin: 0 auto;
-                }}
-                h1 {{
-                    color: white;
-                    text-align: center;
-                    margin-bottom: 10px;
-                }}
-                .update-info {{
-                    color: white;
-                    text-align: center;
-                    margin-bottom: 30px;
-                    opacity: 0.9;
-                }}
-                .movie-card {{
                     background: white;
-                    border-radius: 15px;
-                    padding: 20px;
-                    margin-bottom: 20px;
-                    display: flex;
-                    gap: 20px;
-                    box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+                    border-radius: 20px;
+                    padding: 40px;
+                    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
                 }}
-                .movie-pic img {{
-                    width: 120px;
+                h1 {{ color: #667eea; text-align: center; }}
+                .search-box {{
+                    display: flex;
+                    gap: 10px;
+                    margin: 30px 0;
+                }}
+                input {{
+                    flex: 1;
+                    padding: 15px;
+                    font-size: 16px;
+                    border: 2px solid #ddd;
                     border-radius: 10px;
                 }}
-                .movie-info {{
-                    flex: 1;
+                button {{
+                    padding: 15px 30px;
+                    background: #667eea;
+                    color: white;
+                    border: none;
+                    border-radius: 10px;
+                    cursor: pointer;
+                    font-size: 16px;
                 }}
-                .movie-title {{
-                    color: #667eea;
-                    margin-bottom: 10px;
-                }}
-                .movie-detail {{
-                    color: #555;
-                    margin: 8px 0;
-                }}
-                .movie-link a {{
-                    color: #ff6b6b;
-                    text-decoration: none;
-                }}
-                .back-link {{
+                button:hover {{ background: #764ba2; }}
+                .info {{ background: #e3f2fd; padding: 10px; border-radius: 10px; margin-bottom: 20px; text-align: center; }}
+                .btn {{
                     display: inline-block;
-                    margin: 20px 10px;
-                    padding: 10px 20px;
-                    background: white;
-                    color: #667eea;
+                    background: #667eea;
+                    color: white;
                     text-decoration: none;
+                    padding: 10px 20px;
                     border-radius: 50px;
-                }}
-                .footer {{
-                    text-align: center;
+                    margin-top: 20px;
                 }}
             </style>
         </head>
         <body>
             <div class="container">
-                <h1>🎬 近期上映電影</h1>
-                <div class="update-info">📅 資料更新時間：{last_update}</div>
-        """
-        
-        for movie in movies:
-            html += f"""
-            <div class="movie-card">
-                <div class="movie-pic">
-                    <img src="{movie['poster_url']}" alt="{movie['title']}">
+                <h1>🔍 查詢電影</h1>
+                <div class="info">
+                    📅 資料庫最後更新：{data['last_update']} | 📊 共 {data['count']} 部電影
                 </div>
-                <div class="movie-info">
-                    <h2 class="movie-title">#{movie['id']} 🎬 {movie['title']}</h2>
-                    <p class="movie-detail">📅 上映日期：{movie['release_date']}</p>
-                    <p class="movie-detail">⏱️ 片長：{movie['runtime']} 分鐘</p>
-                    <p class="movie-link">🔗 <a href="{movie['detail_url']}" target="_blank">點我看詳細介紹</a></p>
-                </div>
-            </div>
-            """
-        
-        html += """
-            <div class="footer">
-                <a href="/" class="back-link">🏠 回首頁</a>
-                <a href="/spiderMovie" class="back-link">💾 儲存到快取</a>
-                <a href="/searchMovie" class="back-link">🔍 搜尋電影</a>
-            </div>
-        </div>
-        </body>
-        </html>
-        """
-        return html
-    
-    except Exception as e:
-        return f"<p>爬蟲錯誤：{e}</p>"
-
-
-@app.route("/spiderMovie")
-def spider_movie():
-    """(1) 爬取即將上映電影，儲存到記憶體快取，顯示最近更新日期及筆數"""
-    global movies_cache
-    
-    try:
-        last_update, movies = spider_movies()
-        
-        # 儲存到快取
-        movies_cache = {
-            "data": movies,
-            "last_update": last_update,
-            "count": len(movies)
-        }
-        
-        return f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="UTF-8">
-            <title>爬蟲結果</title>
-            <style>
-                body {{ font-family: Arial; text-align: center; padding: 50px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }}
-                .card {{ background: white; border-radius: 20px; padding: 40px; max-width: 500px; margin: 0 auto; box-shadow: 0 10px 30px rgba(0,0,0,0.2); }}
-                h1 {{ color: #667eea; }}
-                .info {{ font-size: 1.2em; margin: 20px 0; }}
-                .btn {{ display: inline-block; margin: 10px; padding: 10px 20px; background: #667eea; color: white; text-decoration: none; border-radius: 25px; }}
-            </style>
-        </head>
-        <body>
-            <div class="card">
-                <h1>✅ 爬蟲完成並儲存！</h1>
-                <div class="info">📅 最近更新日期：{last_update}</div>
-                <div class="info">🎬 儲存電影數量：{len(movies)} 部</div>
-                <a href="/" class="btn">🏠 回首頁</a>
-                <a href="/searchMovie" class="btn">🔍 前往查詢</a>
-                <a href="/movie" class="btn">🎬 即時爬蟲</a>
-            </div>
-        </body>
-        </html>
-        """
-    except Exception as e:
-        return f"<p>爬蟲錯誤：{e}</p>"
-
-
-@app.route("/searchMovie")
-def search_movie():
-    """(2) 從快取中搜尋電影，列出：編號、片名、海報、介紹頁、上映日期"""
-    
-    keyword = request.args.get("keyword", "")
-    
-    if not keyword:
-        # 顯示搜尋表單
-        return """
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="UTF-8">
-            <title>搜尋電影</title>
-            <style>
-                body { font-family: 'Microsoft JhengHei', Arial; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; display: flex; justify-content: center; align-items: center; }
-                .container { background: white; border-radius: 20px; padding: 40px; width: 90%; max-width: 500px; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.2); }
-                input { padding: 12px; width: 70%; margin: 10px; border: 1px solid #ddd; border-radius: 25px; font-size: 16px; }
-                button { padding: 12px 25px; background: #667eea; color: white; border: none; border-radius: 25px; cursor: pointer; font-size: 16px; }
-                button:hover { background: #764ba2; }
-                h1 { color: #667eea; }
-                .info { color: #666; margin: 10px 0; }
-                .btn { display: inline-block; margin-top: 20px; padding: 10px 20px; background: #4CAF50; color: white; text-decoration: none; border-radius: 25px; }
-                .btn-gray { background: #ccc; color: #333; }
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <h1>🔍 從快取搜尋電影</h1>
-                <div class="info">📌 請先點擊「爬取並儲存電影」建立資料</div>
-                <form method="get" action="/searchMovie">
-                    <input type="text" name="keyword" placeholder="請輸入片名關鍵字，例如：超" required>
-                    <br>
-                    <button type="submit">搜尋</button>
+                <form method="get" action="/searchMovie" class="search-box">
+                    <input type="text" name="keyword" placeholder="請輸入片名關鍵字，例如：蜘蛛人" required>
+                    <button type="submit">🔍 搜尋</button>
                 </form>
-                <a href="/" class="btn btn-gray">🏠 回首頁</a>
-                <a href="/spiderMovie" class="btn">🕷️ 先爬取資料</a>
+                <div style="text-align: center;">
+                    <a href="/" class="btn">🏠 回首頁</a>
+                    <a href="/spiderMovie" class="btn">🔄 重新爬取</a>
+                </div>
             </div>
         </body>
         </html>
         """
     
-    # 從快取查詢
-    global movies_cache
+    # 搜尋符合條件的電影
+    results = []
+    for movie in data['movies']:
+        if keyword in movie['title']:
+            results.append(movie)
     
-    if not movies_cache["data"]:
-        return """
-        <div style="text-align:center; padding:50px;">
-            <h2>⚠️ 暫無資料</h2>
-            <p>請先前往 <a href="/spiderMovie">爬蟲頁面</a> 爬取電影資料</p>
-            <a href="/">回首頁</a>
+    # 顯示搜尋結果
+    results_html = ""
+    for movie in results:
+        results_html += f"""
+        <div style="border: 1px solid #ddd; border-radius: 10px; padding: 15px; margin-bottom: 15px; display: flex; gap: 20px;">
+            <div style="flex-shrink: 0;">
+                <img src="{movie['poster']}" alt="{movie['title']}" style="width: 100px; border-radius: 8px;">
+            </div>
+            <div style="flex: 1;">
+                <h3>#{movie['id']} 🎬 {movie['title']}</h3>
+                <p>📅 上映日期：{movie['release_date']}</p>
+                <p>🔗 <a href="{movie['url']}" target="_blank" style="color: #667eea;">點我看詳細介紹</a></p>
+            </div>
         </div>
         """
     
-    # 模糊比對
-    results = [movie for movie in movies_cache["data"] if keyword in movie['title']]
+    if not results:
+        results_html = f'<p style="text-align:center; color:#999;">❌ 找不到包含「{keyword}」的電影，請試試其他關鍵字</p>'
     
-    # 產生結果頁面
     html = f"""
     <!DOCTYPE html>
-    <html>
+    <html lang="zh-TW">
     <head>
         <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>搜尋結果：{keyword}</title>
         <style>
-            body {{ font-family: 'Microsoft JhengHei', Arial; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 40px; margin: 0; }}
-            .container {{ max-width: 1000px; margin: 0 auto; }}
-            h1 {{ color: white; text-align: center; }}
-            .update-info {{ color: white; text-align: center; margin-bottom: 20px; opacity: 0.9; }}
-            .movie-card {{ background: white; border-radius: 15px; padding: 20px; margin-bottom: 20px; display: flex; gap: 20px; box-shadow: 0 5px 15px rgba(0,0,0,0.2); }}
-            .movie-pic img {{ width: 120px; border-radius: 10px; object-fit: cover; }}
-            .movie-info {{ flex: 1; }}
-            .movie-title {{ color: #667eea; margin-bottom: 10px; }}
-            .movie-detail {{ color: #555; margin: 8px 0; }}
-            .movie-link a {{ color: #ff6b6b; text-decoration: none; }}
-            .footer {{ text-align: center; margin-top: 20px; }}
-            .back-link {{ display: inline-block; margin: 10px; padding: 10px 20px; background: white; color: #667eea; text-decoration: none; border-radius: 50px; }}
-            .no-result {{ background: white; border-radius: 15px; padding: 40px; text-align: center; }}
+            body {{
+                font-family: 'Microsoft JhengHei', Arial, sans-serif;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                min-height: 100vh;
+                padding: 40px;
+                margin: 0;
+            }}
+            .container {{
+                max-width: 900px;
+                margin: 0 auto;
+                background: white;
+                border-radius: 20px;
+                padding: 40px;
+                box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            }}
+            h1 {{ color: #667eea; }}
+            h2 {{ color: #764ba2; border-bottom: 2px solid #667eea; padding-bottom: 10px; }}
+            .search-again {{
+                display: flex;
+                gap: 10px;
+                margin: 20px 0;
+            }}
+            .search-again input {{
+                flex: 1;
+                padding: 10px;
+                border: 2px solid #ddd;
+                border-radius: 8px;
+            }}
+            .search-again button {{
+                padding: 10px 20px;
+                background: #667eea;
+                color: white;
+                border: none;
+                border-radius: 8px;
+                cursor: pointer;
+            }}
+            .btn {{
+                display: inline-block;
+                background: #667eea;
+                color: white;
+                text-decoration: none;
+                padding: 10px 20px;
+                border-radius: 50px;
+                margin-top: 20px;
+                margin-right: 10px;
+            }}
+            .info {{
+                background: #e3f2fd;
+                padding: 10px;
+                border-radius: 10px;
+                margin-bottom: 20px;
+            }}
         </style>
     </head>
     <body>
         <div class="container">
-            <h1>🔍 搜尋「{keyword}」的結果</h1>
-            <div class="update-info">📅 資料快取時間：{movies_cache['last_update']} | 共 {movies_cache['count']} 部電影</div>
-    """
-    
-    if len(results) == 0:
-        html += f"""
-            <div class="no-result">
-                <p>❌ 找不到包含「{keyword}」的電影</p>
-                <p>請嘗試其他關鍵字，或 <a href="/spiderMovie">重新爬取資料</a></p>
+            <h1>🔍 搜尋結果：「{keyword}」</h1>
+            <div class="info">
+                📅 資料庫最後更新：{data['last_update']} | 找到 {len(results)} 部相關電影
             </div>
-        """
-    else:
-        for movie in results:
-            html += f"""
+            
+            <form method="get" action="/searchMovie" class="search-again">
+                <input type="text" name="keyword" placeholder="重新輸入關鍵字" value="{keyword}">
+                <button type="submit">🔍 重新搜尋</button>
+            </form>
+            
+            <h2>📽️ 符合條件的電影：</h2>
+            {results_html}
+            
+            <div style="margin-top: 30px; text-align: center;">
+                <a href="/searchMovie" class="btn">🔄 新搜尋</a>
+                <a href="/" class="btn">🏠 回首頁</a>
+                <a href="/spiderMovie" class="btn">🔄 重新爬取</a>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    return html
+
+
+@app.route("/movie")
+def movie():
+    """爬取開眼電影網近期上映電影，直接顯示在網頁上"""
+    
+    url = "http://www.atmovies.com.tw/movie/next/"
+    Data = requests.get(url, verify=False)
+    Data.encoding = "utf-8"
+    sp = BeautifulSoup(Data.text, "html.parser")
+    result = sp.select(".filmListAllX li")
+    lastUpdate = sp.find("div", class_="smaller09").text[5:]
+
+    html = f"""
+    <!DOCTYPE html>
+    <html lang="zh-TW">
+    <head>
+        <meta charset="UTF-8">
+        <title>近期上映電影</title>
+        <style>
+            body {{
+                font-family: 'Microsoft JhengHei', Arial, sans-serif;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                min-height: 100vh;
+                padding: 40px;
+                margin: 0;
+            }}
+            .container {{
+                max-width: 900px;
+                margin: 0 auto;
+            }}
+            h1 {{
+                color: white;
+                text-align: center;
+                margin-bottom: 10px;
+            }}
+            .update-info {{
+                color: white;
+                text-align: center;
+                margin-bottom: 30px;
+                opacity: 0.9;
+            }}
+            .movie-card {{
+                background: white;
+                border-radius: 15px;
+                padding: 20px;
+                margin-bottom: 20px;
+                display: flex;
+                gap: 20px;
+                box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+            }}
+            .movie-pic img {{
+                width: 120px;
+                border-radius: 10px;
+            }}
+            .movie-info {{
+                flex: 1;
+            }}
+            .movie-title {{
+                color: #667eea;
+                margin-bottom: 10px;
+            }}
+            .movie-detail {{
+                color: #555;
+                margin: 8px 0;
+            }}
+            .movie-link a {{
+                color: #ff6b6b;
+                text-decoration: none;
+            }}
+            .back-link {{
+                display: inline-block;
+                margin: 20px 10px;
+                padding: 10px 20px;
+                background: white;
+                color: #667eea;
+                text-decoration: none;
+                border-radius: 50px;
+            }}
+            .footer {{
+                text-align: center;
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>🎬 近期上映電影</h1>
+            <div class="update-info">📅 資料更新時間：{lastUpdate}</div>
+    """
+
+    for item in result:
+        img_tag = item.find("img")
+        picture = img_tag.get("src") if img_tag else ""
+        
+        title_tag = item.find("div", class_="filmtitle")
+        title = title_tag.text if title_tag else "未知"
+        
+        a_tag = title_tag.find("a") if title_tag else None
+        hyperlink = "http://www.atmovies.com.tw" + a_tag.get("href") if a_tag else ""
+        
+        runtime_tag = item.find("div", class_="runtime")
+        if runtime_tag:
+            show = runtime_tag.text.replace("上映日期：", "").replace("片長：", "").replace("分", "")
+            showDate = show[0:10] if len(show) >= 10 else "未知"
+            showLength = show[13:] if len(show) > 13 else "未知"
+        else:
+            showDate = "未知"
+            showLength = "未知"
+
+        html += f"""
             <div class="movie-card">
                 <div class="movie-pic">
-                    <img src="{movie['poster_url']}" alt="{movie['title']}" onerror="this.src='https://via.placeholder.com/120x170?text=No+Image'">
+                    <img src="{picture}" alt="{title}">
                 </div>
                 <div class="movie-info">
-                    <h2 class="movie-title">#{movie['id']} 🎬 {movie['title']}</h2>
-                    <p class="movie-detail">📅 上映日期：{movie['release_date']}</p>
-                    <p class="movie-detail">⏱️ 片長：{movie['runtime']} 分鐘</p>
-                    <p class="movie-link">🔗 <a href="{movie['detail_url']}" target="_blank">點我看詳細介紹</a></p>
+                    <h2 class="movie-title">🎬 {title}</h2>
+                    <p class="movie-detail">📅 上映日期：{showDate}</p>
+                    <p class="movie-detail">⏱️ 片長：{showLength} 分鐘</p>
+                    <p class="movie-link">🔗 <a href="{hyperlink}" target="_blank">點我看詳細介紹</a></p>
                 </div>
             </div>
-            """
-    
+        """
+
     html += """
             <div class="footer">
                 <a href="/" class="back-link">🏠 回首頁</a>
-                <a href="/searchMovie" class="back-link">🔍 重新搜尋</a>
-                <a href="/spiderMovie" class="back-link">🕷️ 更新資料</a>
-                <a href="/movie" class="back-link">🎬 即時爬蟲</a>
+                <a href="/searchMovie" class="back-link">🔍 搜尋電影</a>
             </div>
         </div>
     </body>
@@ -470,5 +497,97 @@ def search_movie():
     return html
 
 
-# Vercel 需要這個
-app.debug = False
+@app.route("/search")
+def search():
+    """即時搜尋電影（不依賴資料庫）- 保留原有功能"""
+    
+    keyword = request.args.get("keyword", "")
+    
+    if not keyword:
+        return """
+        <!DOCTYPE html>
+        <html>
+        <head><meta charset="UTF-8"><title>搜尋電影</title></head>
+        <body style="text-align:center; padding:50px;">
+            <h1>🔍 請輸入關鍵字</h1>
+            <form method="get" action="/search">
+                <input type="text" name="keyword" placeholder="例如：超" style="padding:10px;width:200px;">
+                <button type="submit" style="padding:10px 20px;">搜尋</button>
+            </form>
+            <br><a href="/">回首頁</a>
+        </body>
+        </html>
+        """
+    
+    url = "http://www.atmovies.com.tw/movie/next/"
+    Data = requests.get(url, verify=False)
+    Data.encoding = "utf-8"
+    sp = BeautifulSoup(Data.text, "html.parser")
+    result = sp.select(".filmListAllX li")
+    
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head><meta charset="UTF-8"><title>搜尋結果：{keyword}</title>
+    <style>
+        body {{ font-family: Arial; background: #f0f0f0; padding: 40px; }}
+        .container {{ max-width: 800px; margin: 0 auto; }}
+        .result {{ background: white; border-radius: 10px; padding: 15px; margin-bottom: 15px; }}
+        h1 {{ color: #667eea; }}
+        a {{ color: #667eea; }}
+    </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>🔍 搜尋「{keyword}」的結果</h1>
+    """
+    
+    found = False
+    for item in result:
+        title_tag = item.find("div", class_="filmtitle")
+        title = title_tag.text if title_tag else ""
+        
+        if keyword in title:
+            found = True
+            a_tag = title_tag.find("a") if title_tag else None
+            hyperlink = "http://www.atmovies.com.tw" + a_tag.get("href") if a_tag else ""
+            
+            runtime_tag = item.find("div", class_="runtime")
+            if runtime_tag:
+                show = runtime_tag.text.replace("上映日期：", "").replace("片長：", "").replace("分", "")
+                showDate = show[0:10] if len(show) >= 10 else "未知"
+                showLength = show[13:] if len(show) > 13 else "未知"
+            else:
+                showDate = "未知"
+                showLength = "未知"
+            
+            html += f"""
+            <div class="result">
+                <h3>🎬 {title}</h3>
+                <p>📅 上映日期：{showDate}</p>
+                <p>⏱️ 片長：{showLength} 分鐘</p>
+                <p>🔗 <a href="{hyperlink}" target="_blank">詳細介紹</a></p>
+            </div>
+            """
+    
+    if not found:
+        html += f"<p>❌ 找不到包含「{keyword}」的電影</p>"
+    
+    html += '<br><a href="/">回首頁</a> | <a href="/searchMovie">改用資料庫查詢</a>'
+    html += "</div></body></html>"
+    
+    return html
+
+
+@app.route("/")
+def index():
+    with open("index.html", "r", encoding="utf-8") as f:
+        return f.read()
+
+
+# 為了 Vercel 部署需要
+app = app
+
+if __name__ == "__main__":
+    app.debug = True
+    app.run()
