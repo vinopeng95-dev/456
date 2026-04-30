@@ -80,6 +80,15 @@
         .btn-secondary:hover {
             background: #ee5a52;
         }
+
+        .btn-green {
+            background: #4CAF50;
+            box-shadow: 0 4px 15px rgba(76, 175, 80, 0.4);
+        }
+
+        .btn-green:hover {
+            background: #45a049;
+        }
     </style>
 </head>
 <body>
@@ -89,8 +98,9 @@
         
         <h2>🎬 開眼電影網 - 電影爬蟲系統</h2>
         
-        <a href="/spiderMovie" class="btn">🚀 (1) 爬取最新電影資料 (存入資料庫)</a>
-        <a href="/searchMovie" class="btn btn-secondary">🔍 (2) 查詢電影 (輸入關鍵字)</a>
+        <a href="/movie" class="btn">🎬 即時爬蟲顯示電影</a>
+        <a href="/spiderMovie" class="btn btn-green">💾 (1) 爬取並存入資料庫</a>
+        <a href="/searchMovie" class="btn btn-secondary">🔍 (2) 從資料庫搜尋電影</a>
     </div>
 </body>
 </html>
