@@ -1,4 +1,4 @@
-requests
-beautifulsoup4
-flask
-urllib3
+requests==2.31.0
+beautifulsoup4==4.12.2
+flask==2.3.3
+urllib3==2.0.7
