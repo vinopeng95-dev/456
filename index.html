@@ -81,13 +81,22 @@
             background: #ee5a52;
         }
 
-        .btn-green {
+        .btn-success {
             background: #4CAF50;
             box-shadow: 0 4px 15px rgba(76, 175, 80, 0.4);
         }
 
-        .btn-green:hover {
+        .btn-success:hover {
             background: #45a049;
+        }
+
+        .btn-info {
+            background: #2196F3;
+            box-shadow: 0 4px 15px rgba(33, 150, 243, 0.4);
+        }
+
+        .btn-info:hover {
+            background: #0b7dda;
         }
     </style>
 </head>
@@ -96,11 +105,15 @@
         <h1>🕷️ 網路爬蟲</h1>
         <div class="subtitle">靜宜大學資管系 彭韋諾</div>
         
-        <h2>🎬 開眼電影網 - 電影爬蟲系統</h2>
+        <h2>🎬 開眼電影網 - 近期上映爬蟲系統</h2>
         
-        <a href="/movie" class="btn">🎬 即時爬蟲顯示電影</a>
-        <a href="/spiderMovie" class="btn btn-green">💾 (1) 爬取並存入資料庫</a>
-        <a href="/searchMovie" class="btn btn-secondary">🔍 (2) 從資料庫搜尋電影</a>
+        <a href="/spiderMovie" class="btn btn-success">🗄️ 爬取並儲存到資料庫 (作業1)</a>
+        <a href="/searchMovie" class="btn btn-info">🔍 從資料庫查詢電影 (作業2)</a>
+        
+        <div style="margin: 20px 0; border-top: 1px solid #eee;"></div>
+        
+        <a href="/movie" class="btn">🚀 即時爬取最新電影資料</a>
+        <a href="/search" class="btn btn-secondary">🔍 即時搜尋(不儲存)</a>
     </div>
 </body>
 </html>
