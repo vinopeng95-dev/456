@@ -1,9 +1,0 @@
-__pycache__/
-*.pyc
-venv/
-env/
-.vscode/
-.idea/
-movies_data.json
-*.log
-.DS_Store
